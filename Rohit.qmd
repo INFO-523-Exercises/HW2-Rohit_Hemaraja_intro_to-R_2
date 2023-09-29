@@ -1,0 +1,578 @@
+---
+title: "HW2"
+author: "Rohit Hemaraja"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r setup111}
+# Get the Data
+
+# Read in with tidytuesdayR package 
+# Install from CRAN via: install.packages("tidytuesdayR")
+# This loads the readme and all the datasets for the week of interest
+
+# Either ISO-8601 date or year/week works!
+
+#tuesdata <- tidytuesdayR::tt_load('2023-04-25')
+#tuesdata <- tidytuesdayR::tt_load(2023, week = 17)
+
+#winners <- tuesdata$winners
+#london_marathon <- tuesdata$london_marathon
+
+
+# Or read in the data manually
+
+winners <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-04-25/winners.csv')
+london_marathon <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-04-25/london_marathon.csv')
+
+
+```
+
+```{r}
+# Sets the repository to download packages from
+options(repos = list(CRAN = "http://cran.rstudio.com/"))
+
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+install.packages("pacman")
+
+# Downloads and load required packages
+pacman::p_load(dlookr, # Exploratory data analysis
+               forecast, # Needed for Box-Cox transformations
+               formattable, # HTML tables from R outputs
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               tidyverse, # Powerful data wrangling package suite
+               ggplot2) #plotting the graphs
+```
+
+```{r}
+london_marathon$Applicants[is.na(london_marathon$Applicants)]<-0
+london_marathon$Accepted[is.na(london_marathon$Accepted)]<-0
+london_marathon$Starters[is.na(london_marathon$Starters)]<-0
+london_marathon$Finishers[is.na(london_marathon$Finishers)]<-0
+london_marathon$Raised[is.na(london_marathon$Raised)]<-0
+london_marathon$`Official charity`[is.na(london_marathon$`Official charity`)]<-"None"
+
+
+ 
+# Generate a color palette
+colors <- rainbow(50)
+
+view(london_marathon)
+
+olympic_colors <- c("#009EDB", "#F4C300", "#000000", "#009E49", "#EF3340")
+
+n_colors <- length(olympic_colors)
+color_gradient <- colorRampPalette(olympic_colors)(42)
+
+ggplot(london_marathon, aes(x = Year, y = Applicants, fill=factor(Year) )) +
+  geom_bar(stat = "identity", position = position_dodge(width = 7))+
+  scale_x_continuous(name = "Year",breaks=seq(1981,2022,1))+
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-1))+
+  scale_fill_manual(values = color_gradient)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1),legend.position = "none")
+  
+```
+
+```{r}
+london_marathon|>
+  head()
+```
+
+# Describing the properties of the Data
+
+```{r}
+london_marathon |>
+  select(Applicants, Accepted, Starters, Finishers, Raised) |>
+  describe() |>
+  select(described_variables,skewness)
+  
+           
+  
+```
+
+# Testing Normality(Accelerated)
+
+```{r}
+london_marathon %>% 
+  plot_normality(Applicants, Accepted, Starters, Finishers, Raised)
+```
+
+# Normality within Groups
+
+```{r}
+london_marathon %>% 
+  filter(Year>=1981 & Year<=2000) %>% 
+  select(Applicants, Accepted) %>% 
+  plot_normality()
+```
+
+# Transforming Data
+
+```{r}
+london<-london_marathon %>% 
+  filter(Applicants>0)
+view(london)
+```
+
+## Square root Transformation
+
+```{r}
+Applicant <-transform(london$Applicants, method = "sqrt")
+summary(Applicant)
+```
+
+```{r}
+Applicant %>% plot()
+
+```
+
+## Logarithmic (+1) Transformation
+
+```{r}
+Applicantlog <- transform(london$Applicants , method="log+1")
+summary(Applicantlog)
+```
+
+```{r}
+Applicantlog %>% plot()
+```
+
+## Inverse Transformation
+
+```{r}
+InvApplicant <- transform(london$Applicants, method="1/x")
+summary(InvApplicant)
+```
+
+```{r}
+InvApplicant |> plot()
+```
+
+## Squared Transformation
+
+```{r}
+SqrApplicants <- transform(london$Applicants, method = "x^2")
+summary(SqrApplicants)
+```
+
+```{r}
+SqrApplicants|>plot()
+```
+
+## Cubed Transformation
+
+```{r}
+CubeApplicant <- transform(london$Applicants, method = "x^3")
+summary(CubeApplicant)
+```
+
+```{r}
+CubeApplicant|> plot()
+```
+
+## Box-Cox Tranformation
+
+```{r}
+BoxApplicants <- transform(london$Applicants, method = "Box-Cox")
+summary(BoxApplicants)
+```
+
+```{r}
+BoxApplicants |> plot()
+
+```
+
+# Produce an HTML Transformation summary
+
+```{r}
+#transformation_web_report(london)
+
+```
+
+# Imputing like a Data Scientist
+
+## Required Setup
+
+```{r setup2}
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+if (!require(pacman))
+  install.packages("pacman")
+
+pacman::p_load(colorblindr, # Colorblind friendly pallettes
+               cluster, # K cluster analyses
+               dlookr, # Exploratory data analysis
+               formattable, # HTML tables from R outputs
+               ggfortify, # Plotting tools for stats
+               ggpubr, # Publishable ggplots
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               plotly, # Visualization package
+               rattle, # Decision tree visualization
+               rpart, # rpart algorithm
+               tidyverse, # Powerful data wrangling package suite
+               visdat,
+               patchwork) # Another EDA visualization package
+
+# Set global ggplot() theme
+# Theme pub_clean() from the ggpubr package with base text size = 16
+theme_set(theme_pubclean(base_size = 16)) 
+# All axes titles to their respective far right sides
+theme_update(axis.title = element_text(hjust = 1))
+# Remove axes ticks
+theme_update(axis.ticks = element_blank()) 
+# Remove legend key
+theme_update(legend.key = element_blank())
+```
+
+## Diagnose Dataset
+
+```{r}
+
+london_marathon |> 
+  diagnose()
+
+
+```
+
+## Diagnose Outliers
+
+```{r}
+# Table showing outliers
+london_marathon |>
+  diagnose_outlier() |>
+  filter(outliers_ratio > 0) |>  
+  mutate(rate = outliers_mean / with_mean) |>
+  arrange(desc(rate)) |> 
+  select(-outliers_cnt)
+```
+
+```{r}
+# Boxplots and histograms of data with and without outliers
+london_marathon |>
+  select(find_outliers(london_marathon)) |>
+           plot_outlier()
+```
+
+## Basic Exploration of Missing Values
+
+```{r}
+na.london_marathon <- london_marathon |>
+  generateNA(p=0.3)
+na.london_marathon|>head()
+```
+
+```{r}
+# Create the NA table
+na.london_marathon |>
+  plot_na_pareto(only_na = TRUE, plot = FALSE)
+```
+
+```{r}
+# Plot the intersect of the columns with missing values
+# This plot visualizes the table above
+na.london_marathon |>
+  plot_na_pareto(only_na = TRUE)
+```
+
+## Advanced Exploration of Missing Values
+
+```{r}
+# Plot the intersect of the 5 columns with the most missing values
+# This means that some combinations of columns have missing values in the same row
+na.london_marathon|>
+  select(Applicants, Accepted, Starters, Finishers, Raised) |>
+  plot_na_intersect(only_na = TRUE) 
+```
+
+## Determining if NA Observations are the same
+
+```{r}
+# Interactive plotly() plot of all NA values to examine every row
+na.london_marathon |>
+ select(Applicants, Accepted, Starters, Finishers, Raised) |>
+ vis_miss() |>
+ ggplotly() 
+```
+
+## Impute Outliers and NAs
+
+### Classifying Outliers
+
+```{r}
+g1<-ggplot(london_marathon, aes(x = Applicants)) +
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5, fill="green")+
+  xlab("Applicants")+
+  scale_x_continuous(labels = scales::number_format(scale = 1e-1))+
+  theme(legend.position = "none")
+g2<-ggplot(london_marathon, aes(x = Accepted)) +
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5, fill="red")+
+  xlab("Accepted")+
+  scale_x_continuous(labels = scales::number_format(scale = 1e-1))+
+  theme(legend.position = "none")
+g3<-ggplot(london_marathon, aes(x = Starters)) +
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5, fill="yellow")+
+  xlab("Starters")+
+  scale_x_continuous(labels = scales::number_format(scale = 1e-1))+
+  theme(legend.position = "none")
+g4<-ggplot(london_marathon, aes(x = Finishers)) +
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5, fill="blue")+
+  xlab("Finishers")+
+  scale_x_continuous(labels = scales::number_format(scale = 1e-1))+
+  theme(legend.position = "none")
+g5<-ggplot(london_marathon, aes(x = Raised)) +
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5, fill="pink")+
+  xlab("Raised")+
+  scale_x_continuous(labels = scales::number_format(scale = 1e-1))+
+  theme(legend.position = "none")
+
+
+# Arrange the plots vertically
+(g1 + g2 + g3 + g4 + g5)
+
+```
+
+# Mean Imputation
+
+```{r}
+# Raw summary, output suppressed
+mean_out_imp_Applicants <-london_marathon |>
+  select(Applicants) |>
+  filter(Applicants < 80000) |>
+  imputate_outlier(Applicants, method = "mean")
+
+# Output showing the summary statistics of our imputation
+mean_out_imp_Applicants |>
+  summary() 
+```
+
+```{r}
+mean_out_imp_Applicants |> plot()
+```
+
+# Median Imputation
+
+```{r}
+# Raw summary, output suppressed
+med_out_imp_Applicants <- london_marathon |>
+  select(Applicants) |>
+  filter(Applicants > 5000) |>
+  imputate_outlier(Applicants, method = "median")
+
+# Output showing the summary statistics of our imputation
+med_out_imp_Applicants |>
+  summary()
+```
+
+```{r}
+# Visualization of the median imputation
+med_out_imp_Applicants |>
+  plot()
+```
+
+# Mode Imputation
+
+```{r}
+# Raw summary, output suppressed
+mode_out_imp_Applicants <- london_marathon |>
+  select(Applicants) |>
+  filter(Applicants > 20000) |>
+  imputate_outlier(Applicants, method = "mode")
+
+# Output showing the summary statistics of our imputation
+mode_out_imp_Applicants |>
+  summary()
+```
+
+```{r}
+# Visualization of the mode imputation
+mode_out_imp_Applicants |>
+plot()
+```
+
+### **Capping Imputation (aka Winsorizing)**
+
+```{r}
+# Raw summary, output suppressed
+cap_out_imp_Applicants <- london_marathon|>
+  select(Applicants) |>
+  filter(Applicants > 20000) |>
+  imputate_outlier(Applicants, method = "capping")
+
+# Output showing the summary statistics of our imputation
+cap_out_imp_Applicants |>
+  summary()
+```
+
+```{r}
+# Visualization of the capping imputation
+cap_out_imp_Applicants |>
+  plot()
+```
+
+# K-Nearest Neighbor (KNN) Imputation
+
+```{r}
+
+# KNN plot of our dataset without categories
+autoplot(clara(winners[-4], 3))
+
+  
+```
+
+## Recursive partitioning and Regression trees
+
+```{r}
+
+london_temp<-london_marathon %>% select(-`Official charity`)
+
+```
+
+```{r, warning=FALSE}
+# Raw summary, output suppressed
+rpart_na_imp_insulin <- london_temp |>
+  imputate_na(Applicants, method = "rpart")
+
+# Plot showing the results of our imputation
+rpart_na_imp_insulin |>
+  plot()
+```
+
+## Produce an HTML Transformation Summary
+
+```{r}
+#transformation_web_report(london)
+```
+
+# Correlating like a Data Master
+
+```{r setup1, message=FALSE}
+if (!require(pacman))
+  install.packages("pacman")
+
+pacman::p_load(colorblindr,
+       dlookr,
+       formattable,
+       GGally,
+       ggdist,
+       ggpubr,
+       ggridges,
+       here,
+       tidyverse)
+
+# Set global ggplot() theme
+# Theme pub_clean() from the ggpubr package with base text size = 16
+theme_set(theme_pubclean(base_size = 12)) 
+# All axes titles to their respective far right sides
+theme_update(axis.title = element_text(hjust = 1))
+# Remove axes ticks
+theme_update(axis.ticks = element_blank()) 
+# Remove legend key
+theme_update(legend.key = element_blank())
+```
+
+## Load and Examine the Dataset
+
+```{r}
+london_marathon |>
+  head(42)
+```
+
+## **Describe and Visualize Correlations**
+
+```{r}
+correlate(london_marathon)
+```
+
+```{r, warning=FALSE}
+london_marathon |> plot_correlate()
+```
+
+## **Visualize Correlations within Groups**
+
+```{r, warning=FALSE}
+
+```
+
+```{r}
+
+```
+
+# **Describe and Visualize Relationships Based on Target Variables**
+
+```{r}
+# First, we need to remove NAs, they cause an error
+#winner.noNA <- winners |> 
+ # drop_na()
+#
+# The numerical predictor variable that we want
+#num <- target_by(winner.noNA , Sap_Flow)
+
+# Relating the variable of interest to the numerical target variable
+#num_num <- relate(num, pLWP)
+
+# Summary of the regression analysis - the same as the summary from lm(Formula)
+#summary( num_num )
+```
+
+### **Numerical Target Variables: Numerical Variable of Interest**
+
+```{r}
+# First, we need to remove NAs, they cause an error
+dataset.noNA <- london_marathon |> 
+  drop_na()
+
+# The numerical predictor variable that we want
+num <- target_by(dataset.noNA, Starters)
+
+# Relating the variable of interest to the numerical target variable
+num_num <- relate(num, Finishers)
+
+# Summary of the regression analysis - the same as the summary from lm(Formula)
+summary(num_num)
+```
+
+```{r}
+# Plotting the linear relationship
+plot(num_num)
+```
+
+## **Numerical Target Variables: Categorical Variable of Interest**
+
+```{r}
+# The categorical predictor variable that we want
+num <- target_by(winners, Category) 
+
+# We need to change Group to a factor
+num$Group <- as.factor(num$Category)
+
+# Relating the variable of interest to the numerical target variable
+num_cat <- relate(num, Year)
+
+# Summary of the ANOVA analysis - the same as the summary from anova(lm(Formula))
+summary(num_cat)
+```
+
+```{r}
+plot(num_cat) + 
+  theme(axis.text.x = element_blank())
+```
